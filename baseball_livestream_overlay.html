@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Overlay de Transmisión de Béisbol</title>
+    <!-- Carga de Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Configuración de fuentes y colores personalizados -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        :root {
+            --mlb-blue: #041E42;
+            --mlb-red: #D50032;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            /* Usamos un fondo oscuro para simular el overlay sobre video */
+            background-color: #0d1117;
+        }
+        /* Estilos específicos para la base (diamante) */
+        .diamond-field {
+            /* Se reduce de 80px a 65px para juntar aún más las bases */
+            width: 65px;
+            height: 65px;
+            position: relative;
+            transform: rotate(-45deg);
+            /* Centramos el diamante */
+            margin: 0 auto;
+        }
+        .base {
+            /* Se aumenta el tamaño de 26px a 30px para hacerlas más grandes */
+            width: 30px;
+            height: 30px;
+            background-color: #374151; /* Gris oscuro por defecto */
+            position: absolute;
+            transition: background-color 0.3s, transform 0.3s;
+            border-radius: 4px;
+        }
+        .runner-on {
+            background-color: var(--mlb-red); /* Rojo si hay corredor */
+            transform: scale(1.2);
+            box-shadow: 0 0 5px var(--mlb-red);
+        }
+        /* Posicionamiento de las bases en el diamante rotado */
+        #third-base { top: 0; left: 0; }
+        #second-base { top: 0; right: 0; }
+        #first-base { bottom: 0; right: 0; }
+        #home-plate { bottom: 0; left: 0; background-color: #D1D5DB; } /* Blanco */
+
+        /* Estilo para el contenedor principal de la transmisión */
+        #stream-display {
+            width: 100%;
+            /* El overlay se ve mejor si tiene un fondo semitransparente o se superpone al video */
+            background-color: rgba(17, 24, 39, 0.95);
+            max-width: 1200px;
+            margin: 0 auto;
+            border-radius: 12px;
+            border: 2px solid #374151;
+            box-shadow: 0 10px 15px rgba(0,0,0,0.5);
+        }
+        /* Ocultar scrollbar en el marcador horizontal */
+        .score-container::-webkit-scrollbar { display: none; }
+        .score-container { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="p-4 md:p-8 min-h-screen">
+
+    <div id="stream-display" class="p-4">
+
+        <!-- SECCIÓN SUPERIOR: MARCADOR, CONTEO Y BASES -->
+        <div class="flex flex-col lg:flex-row justify-between items-center space-y-4 lg:space-y-0 lg:space-x-4">
+
+            <!-- 1. LOGOS Y ESTADO DEL JUEGO (IZQUIERDA) -->
+            <div class="flex items-center space-x-4 p-2 bg-gray-800 rounded-xl shadow-lg w-full lg:w-auto">
+                <!-- Logo MLB (Placeholder) -->
+                <div class="p-2 bg-white rounded-full flex-shrink-0" style="border: 3px solid var(--mlb-blue);">
+                    <svg class="w-8 h-8 text-white" style="fill: var(--mlb-blue);" viewBox="0 0 24 24">
+                        <path d="M12 2a10 10 0 00-10 10 10 10 0 0010 10 10 10 0 0010-10 10 10 0 00-10-10zm0 18a8 8 0 01-8-8 8 8 0 018-8 8 8 0 018 8 8 8 0 01-8 8zM12 7l4 4-4 4-4-4 4-4z"/>
+                    </svg>
+                    <span class="sr-only">Logo MLB</span>
+                </div>
+                <!-- Estado del Juego -->
+                <div class="text-white text-sm font-semibold uppercase">
+                    <span id="game-state">ALTA 1ra</span>
+                    <span class="block text-xs font-normal text-gray-400" id="postseason-logo">MLB POSTEMPORADA</span>
+                </div>
+            </div>
+
+            <!-- 2. MARCADOR INNING POR INNING (CENTRO) -->
+            <div class="flex-1 flex-col bg-gray-700 p-2 rounded-xl shadow-inner w-full overflow-x-auto score-container">
+                <table class="min-w-full text-sm md:text-lg text-white whitespace-nowrap">
+                    <thead>
+                        <tr class="uppercase font-bold text-gray-300">
+                            <th class="py-1 px-2 text-left">Equipo</th>
+                            <!-- Innings -->
+                            <th class="py-1 px-1 text-center" style="min-width: 28px;" data-inning="1">1</th>
+                            <th class="py-1 px-1 text-center" style="min-width: 28px;" data-inning="2">2</th>
+                            <th class="py-1 px-1 text-center" style="min-width: 28px;" data-inning="3">3</th>
+                            <th class="py-1 px-1 text-center" style="min-width: 28px;" data-inning="4">4</th>
+                            <th class="py-1 px-1 text-center" style="min-width: 28px;" data-inning="5">5</th>
+                            <th class="py-1 px-1 text-center" style="min-width: 28px;" data-inning="6">6</th>
+                            <th class="py-1 px-1 text-center" style="min-width: 28px;" data-inning="7">7</th>
+                            <th class="py-1 px-1 text-center" style="min-width: 28px;" data-inning="8">8</th>
+                            <th class="py-1 px-1 text-center" style="min-width: 28px;" data-inning="9">9</th>
+                            <!-- NUEVAS COLUMNAS R, H, E (Totales) -->
+                            <th class="py-1 px-2 text-center bg-blue-700 font-extrabold" style="min-width: 45px;">R</th>
+                            <th class="py-1 px-2 text-center bg-blue-700 font-extrabold" style="min-width: 45px;">H</th>
+                            <th class="py-1 px-2 text-center bg-blue-700 rounded-r-lg font-extrabold" style="min-width: 45px;">E</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Fila Visitante (ROJO) -->
+                        <tr class="font-semibold" id="away-row">
+                            <td class="py-1 px-2 rounded-l-lg" style="background-color: var(--mlb-red);">
+                                <span id="away-name">NYY</span>
+                            </td>
+                            <!-- Inning Scores -->
+                            <td class="py-1 px-1 text-center inning-score" data-team="away" data-inning="1">0</td>
+                            <td class="py-1 px-1 text-center inning-score" data-team="away" data-inning="2">0</td>
+                            <td class="py-1 px-1 text-center inning-score" data-team="away" data-inning="3">0</td>
+                            <td class="py-1 px-1 text-center inning-score" data-team="away" data-inning="4">0</td>
+                            <td class="py-1 px-1 text-center inning-score" data-team="away" data-inning="5">0</td>
+                            <td class="py-1 px-1 text-center inning-score" data-team="away" data-inning="6">0</td>
+                            <td class="py-1 px-1 text-center inning-score" data-team="away" data-inning="7">0</td>
+                            <td class="py-1 px-1 text-center inning-score" data-team="away" data-inning="8">0</td>
+                            <td class="py-1 px-1 text-center inning-score" data-team="away" data-inning="9">0</td>
+                            <!-- Totales R, H, E -->
+                            <td class="py-1 px-2 text-center bg-blue-700 font-extrabold" id="away-total">0</td>
+                            <td class="py-1 px-2 text-center bg-blue-700 font-extrabold" id="away-hits">0</td>
+                            <td class="py-1 px-2 text-center bg-blue-700 font-extrabold rounded-r-lg" id="away-errors">0</td>
+                        </tr>
+                        <!-- Fila Local (AZUL) -->
+                        <tr class="font-semibold" id="home-row">
+                            <td class="py-1 px-2 rounded-l-lg" style="background-color: var(--mlb-blue);">
+                                <span id="home-name">BOS</span>
+                            </td>
+                            <!-- Inning Scores -->
+                            <td class="py-1 px-1 text-center inning-score" data-team="home" data-inning="1">0</td>
+                            <td class="py-1 px-1 text-center inning-score" data-team="home" data-inning="2">0</td>
+                            <td class="py-1 px-1 text-center inning-score" data-team="home" data-inning="3">0</td>
+                            <td class="py-1 px-1 text-center inning-score" data-team="home" data-inning="4">0</td>
+                            <td class="py-1 px-1 text-center inning-score" data-team="home" data-inning="5">0</td>
+                            <td class="py-1 px-1 text-center inning-score" data-team="home" data-inning="6">0</td>
+                            <td class="py-1 px-1 text-center inning-score" data-team="home" data-inning="7">0</td>
+                            <td class="py-1 px-1 text-center inning-score" data-team="home" data-inning="8">0</td>
+                            <td class="py-1 px-1 text-center inning-score" data-team="home" data-inning="9">0</td>
+                            <!-- Totales R, H, E -->
+                            <td class="py-1 px-2 text-center bg-blue-700 font-extrabold" id="home-total">0</td>
+                            <td class="py-1 px-2 text-center bg-blue-700 font-extrabold" id="home-hits">0</td>
+                            <td class="py-1 px-2 text-center bg-blue-700 font-extrabold rounded-r-lg" id="home-errors">0</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 3. CONTEO Y BASES (DERECHA) -->
+            <div class="flex items-center space-x-2 lg:space-x-8 w-full lg:w-auto p-3 bg-gray-800 rounded-xl shadow-lg">
+                <!-- Conteo (B/S/O) -->
+                <div class="flex flex-col text-center space-y-1">
+                    <div class="flex space-x-1">
+                        <span id="balls" class="w-6 h-6 rounded-full font-bold text-sm flex items-center justify-center bg-green-500 text-gray-900">0</span>
+                        <span id="strikes" class="w-6 h-6 rounded-full font-bold text-sm flex items-center justify-center bg-yellow-500 text-gray-900">0</span>
+                        <span id="outs" class="w-6 h-6 rounded-full font-bold text-sm flex items-center justify-center bg-red-500 text-white">0</span>
+                    </div>
+                    <span class="text-xs text-gray-400">B/S/O</span>
+                </div>
+
+                <!-- Diamante (Bases) -->
+                <div class="diamond-field">
+                    <div id="third-base" class="base runner-base-status"></div>
+                    <div id="second-base" class="base runner-base-status"></div>
+                    <div id="first-base" class="base runner-base-status"></div>
+                    <div id="home-plate" class="base"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECCIÓN INFERIOR: JUGADORES (SIN NARRADORES) -->
+        <div class="mt-4 grid grid-cols-1 gap-4"> 
+            
+            <!-- 4. INFO DEL JUGADOR (Bateador/Lanzador) - Ahora ocupa todo el ancho -->
+            <div class="col-span-1 flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
+                <!-- Info Bateador -->
+                <div class="flex-1 p-3 rounded-xl shadow-xl border-2 border-red-500 bg-gray-800">
+                    <p class="text-xs uppercase font-bold text-red-400">Bateador</p>
+                    <p id="current-batter" class="text-xl font-extrabold text-white truncate">Jugador Bateando Nombre</p>
+                    <p id="batter-stats" class="text-sm text-gray-400">AVG: <span id="batter-avg">.300</span> | HR: <span id="batter-hr">15</span> | RBI: <span id="batter-rbi">50</span></p>
+                </div>
+                <!-- Info Lanzador -->
+                <div class="flex-1 p-3 rounded-xl shadow-xl border-2 border-blue-500 bg-gray-800">
+                    <p class="text-xs uppercase font-bold text-blue-400">Lanzador</p>
+                    <p id="current-pitcher" class="text-xl font-extrabold text-white truncate">Lanzador Nombre</p>
+                    <p id="pitcher-stats" class="text-sm text-gray-400">ERA: <span id="pitcher-era">3.50</span> | IP: <span id="pitcher-ip">100.0</span> | K: <span id="pitcher-k">90</span></p>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
+    <!-- PANEL DE CONTROL (Debajo del Overlay) -->
+    <div class="mt-8 p-6 bg-gray-800 rounded-xl shadow-2xl max-w-7xl mx-auto">
+        <h2 class="text-2xl font-bold text-white mb-4 border-b pb-2 border-gray-600">Panel de Control (No Visible en la Transmisión)</h2>
+        <!-- Nuevo layout: 4 columnas en la primera fila, 2 columnas grandes en la segunda -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+
+            <!-- CONTROL 1: MARCADOR (1/4) -->
+            <div class="p-4 bg-gray-700 rounded-lg">
+                <h3 class="font-semibold text-lg mb-3 text-white">Actualizar Marcador</h3>
+                
+                <p class="text-sm font-semibold text-gray-300 mb-2">Ajustar carrera en Inning Actual:</p>
+                <div class="flex flex-col space-y-2 mb-4">
+                    <!-- Botones de SUMA y RESTA para Visitante -->
+                    <div class="flex justify-between items-center">
+                        <label class="text-red-300 font-bold">Visitante (<span id="ctrl-away-name">NYY</span>):</label>
+                        <div class="flex space-x-1">
+                            <button onclick="changeScore('away', -1)" class="px-2 py-1 bg-yellow-600 hover:bg-yellow-700 text-white rounded-md transition duration-150 text-sm shadow-md">-1</button>
+                            <button onclick="changeScore('away', 1)" class="px-2 py-1 bg-green-600 hover:bg-green-700 text-white rounded-md transition duration-150 text-sm shadow-md">+1</button>
+                        </div>
+                    </div>
+                    <!-- Botones de SUMA y RESTA para Local -->
+                    <div class="flex justify-between items-center">
+                        <label class="text-blue-300 font-bold">Local (<span id="ctrl-home-name">BOS</span>):</label>
+                        <div class="flex space-x-1">
+                            <button onclick="changeScore('home', -1)" class="px-2 py-1 bg-yellow-600 hover:bg-yellow-700 text-white rounded-md transition duration-150 text-sm shadow-md">-1</button>
+                            <button onclick="changeScore('home', 1)" class="px-2 py-1 bg-green-600 hover:bg-green-700 text-white rounded-md transition duration-150 text-sm shadow-md">+1</button>
+                        </div>
+                    </div>
+                </div>
+                <button onclick="resetScore()" class="mt-2 w-full px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md transition duration-150 text-sm shadow-md">Reset Carreras Inning Actual</button>
+
+                <!-- Fijar marcador por Inning Específico -->
+                <p class="text-sm font-semibold text-gray-300 mt-4 mb-2 border-t border-gray-600 pt-3">Fijar marcador por Inning:</p>
+                <div class="flex space-x-2 mb-2">
+                    <select id="score-team-select" class="flex-1 p-2 rounded bg-gray-600 text-white text-sm">
+                        <option value="away">Visitante</option>
+                        <option value="home">Local</option>
+                    </select>
+                    <select id="score-inning-select" class="flex-1 p-2 rounded bg-gray-600 text-white text-sm">
+                        <option value="1">1ra</option>
+                        <option value="2">2da</option>
+                        <option value="3">3ra</option>
+                        <option value="4">4ta</option>
+                        <option value="5">5ta</option>
+                        <option value="6">6ta</option>
+                        <option value="7">7ma</option>
+                        <option value="8">8va</option>
+                        <option value="9">9na</option>
+                    </select>
+                </div>
+                <input id="score-runs-input" type="number" min="0" placeholder="Total de Carreras (Ej: 2)" class="w-full p-2 mb-3 rounded bg-gray-600 text-white placeholder-gray-400 text-sm">
+                <button onclick="setSpecificInningScore()" class="w-full px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md transition duration-150 font-bold shadow-md">
+                    Establecer Marcador
+                </button>
+            </div>
+
+            <!-- CONTROL 2: ESTADO DEL JUEGO (2/4) -->
+            <div class="p-4 bg-gray-700 rounded-lg">
+                <h3 class="font-semibold text-lg mb-3 text-white">Estado del Juego</h3>
+                <div class="grid grid-cols-2 gap-3 mb-4">
+                    <!-- Selector de Inning y Mitad -->
+                    <label class="text-white col-span-2 text-sm font-semibold">Fijar Inning y Mitad:</label>
+                    <div class="col-span-1 flex space-x-1">
+                        <select id="set-inning-number" class="w-full p-2 rounded bg-gray-600 text-white text-sm">
+                            <option value="1">1ra</option>
+                            <option value="2">2da</option>
+                            <option value="3">3ra</option>
+                            <option value="4">4ta</option>
+                            <option value="5">5ta</option>
+                            <option value="6">6ta</option>
+                            <option value="7">7ma</option>
+                            <option value="8">8va</option>
+                            <option value="9">9na</option>
+                        </select>
+                    </div>
+                    <div class="col-span-1 flex space-x-1">
+                        <button onclick="setHalf(true)" class="flex-1 px-2 py-2 bg-red-500 hover:bg-red-600 text-white rounded-md transition duration-150 text-sm shadow-md">ALTA</button>
+                        <button onclick="setHalf(false)" class="flex-1 px-2 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-md transition duration-150 text-sm shadow-md">BAJA</button>
+                    </div>
+                    
+                    <button onclick="changeInning()" class="col-span-2 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-gray-900 rounded-md transition duration-150 font-bold shadow-md">
+                        Avanzar Media Entrada (3 Outs)
+                    </button>
+                    <!-- BSO CONTROLS -->
+                    <button onclick="changeCount('balls', 1)" class="px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-md transition duration-150 shadow-md">Bola (+B)</button>
+                    <button onclick="changeCount('strikes', 1)" class="px-3 py-2 bg-yellow-500 hover:bg-yellow-600 text-gray-900 rounded-md transition duration-150 shadow-md">Strike (+S)</button>
+                    <button onclick="changeCount('outs', 1)" class="px-3 py-2 bg-red-500 hover:bg-red-600 text-white rounded-md transition duration-150 shadow-md">Out (+O)</button>
+                    <button onclick="changeCount('reset')" class="col-span-2 px-3 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-md transition duration-150 shadow-md">Reset B/S/O</button>
+                </div>
+            </div>
+
+            <!-- CONTROL 3: CORREDORES EN BASE (3/4) -->
+            <div class="p-4 bg-gray-700 rounded-lg">
+                <h3 class="font-semibold text-lg mb-3 text-white">Corredores en Base</h3>
+                <div class="grid grid-cols-2 gap-3">
+                    <button onclick="toggleRunner('firstBase')" class="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-md transition duration-150 shadow-md">1ra Base</button>
+                    <button onclick="toggleRunner('secondBase')" class="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-md transition duration-150 shadow-md">2da Base</button>
+                    <button onclick="toggleRunner('thirdBase')" class="col-span-2 px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-md transition duration-150 shadow-md">3ra Base</button>
+                    <button onclick="clearRunners()" class="col-span-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md transition duration-150 shadow-md">Limpiar Bases</button>
+                </div>
+            </div>
+
+            <!-- CONTROL 4: HITS Y ERRORES (4/4) -->
+            <div class="p-4 bg-gray-700 rounded-lg">
+                <h3 class="font-semibold text-lg mb-3 text-white">Hits y Errores (H/E)</h3>
+                
+                <p class="text-sm font-semibold text-gray-300 mb-2">Ajustar Hits Conectados:</p>
+                <div class="flex flex-col space-y-2 mb-4 border-b pb-3 border-gray-600">
+                    <!-- Botones de SUMA y RESTA para Hits Visitante -->
+                    <div class="flex justify-between items-center">
+                        <label class="text-red-300 font-bold">Visitante (<span id="ctrl-away-name-h">NYY</span>):</label>
+                        <div class="flex space-x-1">
+                            <button onclick="updateHitsAndErrors('away', 'hits', -1)" class="px-2 py-1 bg-yellow-600 hover:bg-yellow-700 text-white rounded-md transition duration-150 text-sm shadow-md">-1 H</button>
+                            <button onclick="updateHitsAndErrors('away', 'hits', 1)" class="px-2 py-1 bg-teal-600 hover:bg-teal-700 text-white rounded-md transition duration-150 text-sm shadow-md">+1 H</button>
+                        </div>
+                    </div>
+                    <!-- Botones de SUMA y RESTA para Hits Local -->
+                    <div class="flex justify-between items-center">
+                        <label class="text-blue-300 font-bold">Local (<span id="ctrl-home-name-h">BOS</span>):</label>
+                        <div class="flex space-x-1">
+                            <button onclick="updateHitsAndErrors('home', 'hits', -1)" class="px-2 py-1 bg-yellow-600 hover:bg-yellow-700 text-white rounded-md transition duration-150 text-sm shadow-md">-1 H</button>
+                            <button onclick="updateHitsAndErrors('home', 'hits', 1)" class="px-2 py-1 bg-teal-600 hover:bg-teal-700 text-white rounded-md transition duration-150 text-sm shadow-md">+1 H</button>
+                        </div>
+                    </div>
+                </div>
+
+                <p class="text-sm font-semibold text-gray-300 mt-3 mb-2">Ajustar Errores Cometidos:</p>
+                <div class="flex flex-col space-y-2">
+                    <!-- Botones de SUMA y RESTA para Errores Visitante -->
+                    <div class="flex justify-between items-center">
+                        <label class="text-red-300 font-bold">Visitante (<span id="ctrl-away-name-e">NYY</span>):</label>
+                        <div class="flex space-x-1">
+                            <button onclick="updateHitsAndErrors('away', 'errors', -1)" class="px-2 py-1 bg-yellow-600 hover:bg-yellow-700 text-white rounded-md transition duration-150 text-sm shadow-md">-1 E</button>
+                            <button onclick="updateHitsAndErrors('away', 'errors', 1)" class="px-2 py-1 bg-orange-600 hover:bg-orange-700 text-white rounded-md transition duration-150 text-sm shadow-md">+1 E</button>
+                        </div>
+                    </div>
+                    <!-- Botones de SUMA y RESTA para Errores Local -->
+                    <div class="flex justify-between items-center">
+                        <label class="text-blue-300 font-bold">Local (<span id="ctrl-home-name-e">BOS</span>):</label>
+                        <div class="flex space-x-1">
+                            <button onclick="updateHitsAndErrors('home', 'errors', -1)" class="px-2 py-1 bg-yellow-600 hover:bg-yellow-700 text-white rounded-md transition duration-150 text-sm shadow-md">-1 E</button>
+                            <button onclick="updateHitsAndErrors('home', 'errors', 1)" class="px-2 py-1 bg-orange-600 hover:bg-orange-700 text-white rounded-md transition duration-150 text-sm shadow-md">+1 E</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+        
+        <!-- SEGUNDA FILA DE CONTROLES (lg:col-span-2 cada uno) -->
+        <div class="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-6">
+
+            <!-- CONTROL 5: JUGADORES Y EQUIPOS (Antiguo CONTROL 4) -->
+            <div class="p-4 bg-gray-700 rounded-lg">
+                <h3 class="font-semibold text-lg mb-3 text-white">Jugadores / Equipos</h3>
+                <input id="new-batter" type="text" placeholder="Nuevo Bateador" class="w-full p-2 mb-2 rounded bg-gray-600 text-white placeholder-gray-400">
+                <button onclick="updatePlayer('batter')" class="w-full px-4 py-2 mb-3 bg-red-500 hover:bg-red-600 text-white rounded-md transition duration-150 shadow-md">Actualizar Bateador</button>
+                
+                <input id="new-pitcher" type="text" placeholder="Nuevo Lanzador" class="w-full p-2 mb-2 rounded bg-gray-600 text-white placeholder-gray-400">
+                <button onclick="updatePlayer('pitcher')" class="w-full px-4 py-2 mb-3 bg-blue-500 hover:bg-blue-600 text-white rounded-md transition duration-150 shadow-md">Actualizar Lanzador</button>
+                
+                <input id="new-away-name" type="text" placeholder="Abreviatura Visitante (3 letras)" maxlength="3" class="w-full p-2 mb-2 rounded bg-gray-600 text-white placeholder-gray-400 uppercase">
+                <input id="new-home-name" type="text" placeholder="Abreviatura Local (3 letras)" maxlength="3" class="w-full p-2 mb-2 rounded bg-gray-600 text-white placeholder-gray-400 uppercase">
+                <button onclick="updateTeamNames()" class="w-full px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-md transition duration-150 shadow-md">Actualizar Equipos</button>
+            </div>
+
+            <!-- CONTROL 6: ESTADÍSTICAS (Antiguo CONTROL 5) - ARREGLADO EL LAYOUT -->
+            <div class="p-4 bg-gray-700 rounded-lg">
+                <h3 class="font-semibold text-lg mb-3 text-white">Estadísticas de Jugadores</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <!-- BATEADOR STATS -->
+                    <div class="p-3 bg-gray-600 rounded-lg">
+                        <p class="font-bold text-red-300 mb-2">Bateador (<span id="stats-batter-name">Jugador Bateando Nombre</span>)</p>
+                        <!-- ANTES: flex space-x-2 -> AHORA: grid grid-cols-1 gap-2 (Vertical) -->
+                        <div class="grid grid-cols-1 gap-2">
+                            <input id="new-batter-avg" type="text" placeholder="AVG (.300)" class="w-full p-2 rounded bg-gray-700 text-white placeholder-gray-400 text-sm">
+                            <input id="new-batter-hr" type="number" placeholder="HR (15)" class="w-full p-2 rounded bg-gray-700 text-white placeholder-gray-400 text-sm">
+                            <input id="new-batter-rbi" type="number" placeholder="RBI (50)" class="w-full p-2 rounded bg-gray-700 text-white placeholder-gray-400 text-sm">
+                        </div>
+                        <button onclick="updateBatterStats()" class="mt-3 w-full px-4 py-2 bg-red-700 hover:bg-red-800 text-white rounded-md transition duration-150 shadow-md text-sm">Actualizar Estadísticas Bateador</button>
+                    </div>
+                    
+                    <!-- LANZADOR STATS -->
+                    <div class="p-3 bg-gray-600 rounded-lg">
+                        <p class="font-bold text-blue-300 mb-2">Lanzador (<span id="stats-pitcher-name">Lanzador Nombre</span>)</p>
+                        <!-- ANTES: flex space-x-2 -> AHORA: grid grid-cols-1 gap-2 (Vertical) -->
+                        <div class="grid grid-cols-1 gap-2">
+                            <input id="new-pitcher-era" type="text" placeholder="ERA (3.50)" class="w-full p-2 rounded bg-gray-700 text-white placeholder-gray-400 text-sm">
+                            <input id="new-pitcher-ip" type="text" placeholder="IP (100.0)" class="w-full p-2 rounded bg-gray-700 text-white placeholder-gray-400 text-sm">
+                            <input id="new-pitcher-k" type="number" placeholder="K (90)" class="w-full p-2 rounded bg-gray-700 text-white placeholder-gray-400 text-sm">
+                        </div>
+                        <button onclick="updatePitcherStats()" class="mt-3 w-full px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-md transition duration-150 shadow-md text-sm">Actualizar Estadísticas Lanzador</button>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+
+    <script>
+        // --- ESTADO INICIAL DEL JUEGO ---
+        let score = {
+            // Añadidos 'hits: 0, errors: 0'
+            home: { name: "BOS", runs: Array(9).fill(0), total: 0, hits: 0, errors: 0 },
+            away: { name: "NYY", runs: Array(9).fill(0), total: 0, hits: 0, errors: 0 }
+        };
+
+        let gameState = {
+            inning: 1,
+            isTop: true, // true: Alta, false: Baja
+            outs: 0,
+            balls: 0,
+            strikes: 0,
+            firstBase: false,
+            secondBase: false,
+            thirdBase: false,
+            // Jugadores
+            batter: "Jugador Bateando Nombre",
+            pitcher: "Lanzador Nombre",
+            // Estadísticas del Bateador
+            batterStats: {
+                avg: '.300',
+                hr: 15,
+                rbi: 50
+            },
+            // Estadísticas del Lanzador
+            pitcherStats: {
+                era: '3.50',
+                ip: '100.0',
+                k: 90
+            }
+        };
+
+        // --- FUNCIONES DE RENDERIZADO Y LÓGICA ---
+
+        /**
+         * Actualiza el marcador visible en la tabla y los totales.
+         */
+        function renderScoreboard() {
+            // Actualizar innings
+            for (let i = 1; i <= 9; i++) {
+                document.querySelector(`.inning-score[data-team="away"][data-inning="${i}"]`).textContent = score.away.runs[i - 1];
+                document.querySelector(`.inning-score[data-team="home"][data-inning="${i}"]`).textContent = score.home.runs[i - 1];
+            }
+
+            // Actualizar totales de Carreras
+            document.getElementById('away-total').textContent = score.away.total;
+            document.getElementById('home-total').textContent = score.home.total;
+            
+            // NUEVO: Actualizar Hits y Errores
+            document.getElementById('away-hits').textContent = score.away.hits;
+            document.getElementById('home-hits').textContent = score.home.hits;
+            document.getElementById('away-errors').textContent = score.away.errors;
+            document.getElementById('home-errors').textContent = score.home.errors;
+
+            // Resaltar el inning actual
+            document.querySelectorAll('th[data-inning]').forEach(th => {
+                th.classList.remove('bg-gray-600');
+                if (parseInt(th.dataset.inning) === gameState.inning) {
+                    th.classList.add('bg-gray-600');
+                }
+            });
+
+            // Resaltar la fila del equipo bateando
+            document.getElementById('away-row').classList.remove('font-extrabold', 'text-yellow-300');
+            document.getElementById('home-row').classList.remove('font-extrabold', 'text-yellow-300');
+            
+            const battingTeamId = gameState.isTop ? 'away-row' : 'home-row';
+            document.getElementById(battingTeamId).classList.add('font-extrabold', 'text-yellow-300');
+        }
+
+        /**
+         * Actualiza el estado del juego (Inning y Mitad).
+         */
+        function renderGameState() {
+            const mitad = gameState.isTop ? 'ALTA' : 'BAJA';
+            const suffix = gameState.inning === 1 ? 'ra' : 
+                           gameState.inning === 3 ? 'ra' : 
+                           gameState.inning === 4 ? 'ta' :
+                           gameState.inning === 5 ? 'ta' :
+                           gameState.inning === 6 ? 'ta' :
+                           gameState.inning === 7 ? 'ma' :
+                           gameState.inning === 8 ? 'va' :
+                           gameState.inning === 9 ? 'na' : 'to'; // Catch-all just in case
+            
+            document.getElementById('game-state').textContent = `${mitad} ${gameState.inning}${suffix}`;
+            
+            // Sincronizar el selector de inning con el estado actual del juego
+            const inningSelector = document.getElementById('set-inning-number');
+            if (inningSelector) {
+                inningSelector.value = gameState.inning.toString();
+            }
+        }
+
+        /**
+         * Actualiza el conteo de bolas, strikes y outs.
+         */
+        function renderCount() {
+            document.getElementById('balls').textContent = gameState.balls;
+            document.getElementById('strikes').textContent = gameState.strikes;
+            document.getElementById('outs').textContent = gameState.outs;
+        }
+
+        /**
+         * Actualiza el estado de los corredores en las bases.
+         */
+        function renderRunners() {
+            document.getElementById('first-base').classList.toggle('runner-on', gameState.firstBase);
+            document.getElementById('second-base').classList.toggle('runner-on', gameState.secondBase);
+            document.getElementById('third-base').classList.toggle('runner-on', gameState.thirdBase);
+        }
+
+        /**
+         * Actualiza los nombres y estadísticas del bateador y lanzador.
+         */
+        function renderPlayers() {
+            // Nombres
+            document.getElementById('current-batter').textContent = gameState.batter;
+            document.getElementById('current-pitcher').textContent = gameState.pitcher;
+            document.getElementById('stats-batter-name').textContent = gameState.batter;
+            document.getElementById('stats-pitcher-name').textContent = gameState.pitcher;
+
+            // Estadísticas del Bateador
+            document.getElementById('batter-avg').textContent = gameState.batterStats.avg;
+            document.getElementById('batter-hr').textContent = gameState.batterStats.hr;
+            document.getElementById('batter-rbi').textContent = gameState.batterStats.rbi;
+            
+            // Estadísticas del Lanzador
+            document.getElementById('pitcher-era').textContent = gameState.pitcherStats.era;
+            document.getElementById('pitcher-ip').textContent = gameState.pitcherStats.ip;
+            document.getElementById('pitcher-k').textContent = gameState.pitcherStats.k;
+        }
+        
+        /**
+         * Actualiza las abreviaturas de los equipos.
+         */
+        function renderTeamNames() {
+            document.getElementById('away-name').textContent = score.away.name;
+            document.getElementById('home-name').textContent = score.home.name;
+            // También en el panel de control
+            document.getElementById('ctrl-away-name').textContent = score.away.name;
+            document.getElementById('ctrl-home-name').textContent = score.home.name;
+            
+            // Para los nuevos controles de H/E
+            document.getElementById('ctrl-away-name-h').textContent = score.away.name;
+            document.getElementById('ctrl-home-name-h').textContent = score.home.name;
+            document.getElementById('ctrl-away-name-e').textContent = score.away.name;
+            document.getElementById('ctrl-home-name-e').textContent = score.home.name;
+        }
+
+        /**
+         * Función principal para renderizar todo.
+         */
+        function renderAll() {
+            renderTeamNames();
+            renderScoreboard();
+            renderGameState();
+            renderCount();
+            renderRunners();
+            renderPlayers();
+        }
+
+        // --- MANEJADORES DE EVENTOS DE CONTROL ---
+
+        /**
+         * Recalcula el total de carreras para un equipo.
+         * @param {('home'|'away')} team - Equipo a actualizar.
+         */
+        function calculateTotal(team) {
+            score[team].total = score[team].runs.reduce((acc, run) => acc + run, 0);
+        }
+
+        /**
+         * Aumenta/resta el marcador del equipo en el inning actual.
+         * @param {('home'|'away')} team - Equipo a actualizar.
+         * @param {number} runs - Cantidad de carreras a agregar (puede ser negativo para restar).
+         */
+        function changeScore(team, runs) {
+            const inningIndex = gameState.inning - 1;
+            
+            if (inningIndex >= 0 && inningIndex < 9) {
+                // Solo el equipo que batea puede ajustar las carreras en el inning actual
+                if ((team === 'away' && gameState.isTop) || (team === 'home' && !gameState.isTop)) {
+                    
+                    const newRunCount = score[team].runs[inningIndex] + runs;
+                    
+                    // Comprobación de seguridad: no permitir carreras negativas en un inning
+                    if (newRunCount < 0) {
+                         console.error("No se pueden tener carreras negativas en un inning. Valor actual: " + score[team].runs[inningIndex]);
+                         return; 
+                    }
+                    
+                    score[team].runs[inningIndex] = newRunCount;
+                    calculateTotal(team);
+                    renderAll();
+
+                } else {
+                    console.error("Solo puede ajustar carreras el equipo que está bateando en el inning actual.");
+                }
+            } else {
+                console.error("Límite de 9 innings para esta demo.");
+            }
+        }
+
+        /**
+         * NUEVA FUNCIÓN: Actualiza los totales de Hits (H) y Errores (E).
+         * @param {('home'|'away')} team - Equipo a actualizar.
+         * @param {('hits'|'errors')} type - Tipo de estadística (hits o errors).
+         * @param {number} amount - Cantidad a sumar (puede ser negativo para restar).
+         */
+        function updateHitsAndErrors(team, type, amount) {
+            if (score[team][type] !== undefined) {
+                const newTotal = score[team][type] + amount;
+                
+                if (newTotal < 0) {
+                     const statName = type === 'hits' ? 'hits' : 'errores';
+                     console.error(`No se pueden tener ${statName} negativos. Valor actual: ` + score[team][type]);
+                     return;
+                }
+                
+                score[team][type] = newTotal;
+                renderScoreboard();
+            }
+        }
+
+        /**
+         * Fija manualmente el score de un inning específico.
+         */
+        function setSpecificInningScore() {
+            const team = document.getElementById('score-team-select').value;
+            const inningIndex = parseInt(document.getElementById('score-inning-select').value) - 1;
+            const runs = parseInt(document.getElementById('score-runs-input').value);
+
+            if (runs >= 0 && inningIndex >= 0 && inningIndex < 9 && !isNaN(runs)) {
+                // Actualizar las carreras del inning específico
+                score[team].runs[inningIndex] = runs;
+                
+                // Recalcular el total
+                calculateTotal(team);
+
+                // Limpiar input y renderizar
+                document.getElementById('score-runs-input').value = '';
+                renderAll();
+                console.log(`Marcador fijado: ${team.toUpperCase()} anota ${runs} carreras en el Inning ${inningIndex + 1}. Total actualizado.`);
+
+            } else {
+                console.error("Valores de entrada inválidos para fijar marcador por inning. Asegúrate de que el número de carreras sea >= 0.");
+            }
+        }
+
+        /**
+         * Cambia entre Alta/Baja y avanza el inning (Llamada al haber 3 outs).
+         */
+        function changeInning() {
+            if (gameState.isTop === true) {
+                // De Alta a Baja
+                gameState.isTop = false;
+            } else {
+                // De Baja a Alta, avanzar inning
+                gameState.isTop = true;
+                if (gameState.inning < 9) {
+                    gameState.inning++;
+                } else {
+                    console.log("Fin del 9no inning. ¡Juego terminado!");
+                }
+            }
+            // Resetear conteo de B/S/O y bases al cambiar de mitad/inning
+            changeCount('reset');
+            clearRunners();
+            renderAll();
+        }
+        
+        /**
+         * Establece la mitad del inning (Alta o Baja).
+         * @param {boolean} isTopValue - true para Alta, false para Baja.
+         */
+        function setHalf(isTopValue) {
+            gameState.isTop = isTopValue;
+            renderAll();
+        }
+
+        /**
+         * Establece el inning actual al valor del selector.
+         */
+        function setInningFromSelector() {
+            const inningValue = parseInt(document.getElementById('set-inning-number').value);
+            if (inningValue >= 1 && inningValue <= 9) {
+                gameState.inning = inningValue;
+                renderAll();
+            }
+        }
+
+
+        /**
+         * Actualiza el conteo de B/S/O.
+         * @param {('balls'|'strikes'|'outs'|'reset')} type - Tipo de conteo.
+         * @param {number} [amount=1] - Cantidad a sumar.
+         */
+        function changeCount(type, amount = 1) {
+            if (type === 'reset') {
+                gameState.balls = 0;
+                gameState.strikes = 0;
+                gameState.outs = 0;
+            } else if (type === 'balls') {
+                gameState.balls += amount;
+                if (gameState.balls >= 4) {
+                    gameState.balls = 0;
+                    gameState.strikes = 0;
+                    console.log("¡Base por Bola! El conteo se reinicia.");
+                }
+            } else if (type === 'strikes') {
+                gameState.strikes += amount;
+                if (gameState.strikes >= 3) {
+                    gameState.balls = 0;
+                    gameState.strikes = 0;
+                    changeCount('outs', 1); // Suma un out
+                    console.log("¡Strikeout! El conteo se reinicia.");
+                }
+            } else if (type === 'outs') {
+                gameState.outs += amount;
+                if (gameState.outs >= 3) {
+                    // 3 Outs, cambiar de mitad/inning
+                    gameState.outs = 0;
+                    changeInning();
+                    console.log("¡Tercer Out! Cambio de Mitad/Inning.");
+                }
+            }
+            renderCount();
+        }
+
+        /**
+         * Alterna el estado de un corredor en base.
+         * @param {('firstBase'|'secondBase'|'thirdBase')} base - La base a alternar.
+         */
+        function toggleRunner(base) {
+            gameState[base] = !gameState[base];
+            renderRunners();
+        }
+
+        /**
+         * Limpia todos los corredores de las bases.
+         */
+        function clearRunners() {
+            gameState.firstBase = false;
+            gameState.secondBase = false;
+            gameState.thirdBase = false;
+            renderRunners();
+        }
+        
+        /**
+         * Resetea el score del inning actual a cero (para corregir errores).
+         */
+        function resetScore() {
+            const team = gameState.isTop ? 'away' : 'home';
+            const inningIndex = gameState.inning - 1;
+            
+            if (inningIndex >= 0 && inningIndex < 9) {
+                score[team].runs[inningIndex] = 0;
+                calculateTotal(team); // Recalcular total
+                renderAll();
+            }
+        }
+        
+        /**
+         * Actualiza el nombre del bateador o lanzador.
+         * @param {('batter'|'pitcher')} role - Rol a actualizar.
+         */
+        function updatePlayer(role) {
+            const inputId = `new-${role}`;
+            const newName = document.getElementById(inputId).value.trim();
+            if (newName) {
+                gameState[role] = newName;
+                document.getElementById(inputId).value = ''; // Limpiar input
+                renderPlayers();
+            } else {
+                console.log(`Por favor, introduce el nombre del nuevo ${role === 'batter' ? 'bateador' : 'lanzador'}.`);
+            }
+        }
+
+        /**
+         * Actualiza las estadísticas del bateador (AVG, HR, RBI).
+         */
+        function updateBatterStats() {
+            const newAvg = document.getElementById('new-batter-avg').value.trim();
+            const newHr = document.getElementById('new-batter-hr').value.trim();
+            const newRbi = document.getElementById('new-batter-rbi').value.trim();
+
+            if (newAvg) gameState.batterStats.avg = newAvg;
+            if (newHr) gameState.batterStats.hr = parseInt(newHr) || gameState.batterStats.hr;
+            if (newRbi) gameState.batterStats.rbi = parseInt(newRbi) || gameState.batterStats.rbi;
+
+            // Limpiar inputs
+            document.getElementById('new-batter-avg').value = '';
+            document.getElementById('new-batter-hr').value = '';
+            document.getElementById('new-batter-rbi').value = '';
+            
+            renderPlayers();
+        }
+
+        /**
+         * Actualiza las estadísticas del lanzador (ERA, IP, K).
+         */
+        function updatePitcherStats() {
+            const newEra = document.getElementById('new-pitcher-era').value.trim();
+            const newIp = document.getElementById('new-pitcher-ip').value.trim();
+            const newK = document.getElementById('new-pitcher-k').value.trim();
+
+            if (newEra) gameState.pitcherStats.era = newEra;
+            if (newIp) gameState.pitcherStats.ip = newIp;
+            if (newK) gameState.pitcherStats.k = parseInt(newK) || gameState.pitcherStats.k;
+
+            // Limpiar inputs
+            document.getElementById('new-pitcher-era').value = '';
+            document.getElementById('new-pitcher-ip').value = '';
+            document.getElementById('new-pitcher-k').value = '';
+            
+            renderPlayers();
+        }
+
+        /**
+         * Actualiza los nombres abreviados de los equipos.
+         */
+        function updateTeamNames() {
+            const newAway = document.getElementById('new-away-name').value.trim().toUpperCase();
+            const newHome = document.getElementById('new-home-name').value.trim().toUpperCase();
+            
+            if (newAway.length === 3) score.away.name = newAway;
+            if (newHome.length === 3) score.home.name = newHome;
+            
+            // Limpiar inputs
+            if (newAway.length === 3) document.getElementById('new-away-name').value = '';
+            if (newHome.length === 3) document.getElementById('new-home-name').value = '';
+
+            renderTeamNames();
+        }
+
+        // Listener para actualizar el inning cuando el selector cambia (Sincronización)
+        document.addEventListener('DOMContentLoaded', () => {
+             const inningSelector = document.getElementById('set-inning-number');
+             if(inningSelector) {
+                inningSelector.addEventListener('change', setInningFromSelector);
+             }
+        });
+
+
+        // Reemplazamos alert() por console.log() para evitar problemas en el iFrame
+        const originalAlert = window.alert;
+        window.alert = function(message) {
+            console.log("ALERTA (simulada): " + message);
+        };
+
+        // Inicializar el overlay al cargar
+        window.onload = renderAll;
+    </script>
+
+</body>
+</html>
